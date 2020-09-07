@@ -1,0 +1,90 @@
+---
+title: "Exercise quality model using body accelerometer predictors"
+author: "Andrés Sierra-Ricaurte"
+date: "7/9/2020"
+output: html_document
+---
+## Abstract
+
+In this project I used the weight lifting data set from the groupware@LES database (http://groupware.les.inf.puc-rio.br/har). The aim was to successfully predict the way in which the experimental subjects did the exercise (1 correct way and 4 incorrect ways). I could not fit some models, as the glm, because the response variable is a five character variable, so I used mainly a linear discriminant analysis (LDA). I fitted two lda models, one withut preprocessing and another using a PCA preprocessing, in order to avoid correlations between variables. The model without preprocessing showed a higher accuracy, so to predict the test data set I used this model. Given that the accuracy was near to 70%, more comlexed discriminant models should be used.
+
+### First steps
+
+To begin, I loaded the datasets, and select only the variables related with the measures to be considered. Also for some variables almost the totality of values were NA's, so I also did not consider those variables.
+
+```{r, echo=TRUE, cache=TRUE}
+data_init <- read.csv("./Training.csv", na.strings = c(" ", "", "NA"))
+test_quiz <- read.csv("./testing.csv", na.strings = c(" ", "", "NA"))
+
+#Selecting the variables related with the accelerometer meassures
+data_train <- data_init[, grep("arm|belt|dumbbell", names(data_init), value = T)]
+data_testq <- test_quiz[, grep("arm|belt|dumbbell", names(test_quiz), value = T)]
+
+#Now we want to eliminate the columns were there are NA values for the test and train
+#datasets
+nas <- apply(data_train, 2, is.na)
+nas <- apply(nas, 2, sum)
+data_train <- data_train[, nas==0]
+data_train$classe <- data_init$classe
+
+nastest <- apply(data_testq, 2, is.na)
+nastest <- apply(nastest, 2, sum)
+data_testq <- data_testq[, nas==0]
+
+```
+
+### Data partition and exploratory model
+
+Then using the caret package I made the data partition, obtaining a training and a testing datasets.
+My first trial was to fit a model including all the variables (52 after the data cleaning in the previous section). Some other models (lm, glm) were discarded as some errors appeared due to the nature of the response variable.
+
+```{r, comment="", message=FALSE}
+library(caret)
+#Now we will divide the data into training and testing data
+set.seed(12345)
+inTrain <- createDataPartition(y=data_train$classe, p=0.70, list=F)
+training <- data_train[inTrain, ]
+testing <- data_train[-inTrain, ]
+
+#First model without preprocessing 
+model1 <- train(classe~., data=training, method="lda")  
+model1$results
+```
+
+As we can see, the accuracy was near the 70%. I believed that as some of the variables could be related, using a PCA preprocessing analysis could have favorable effects over the model accuracy.
+
+### Model with PCA preprocessing
+
+I used the PCA method in the `preProcess` function, and I selected a thresh of 0.90 of explained variation (with 0.95 the accuracy was lower) for the principal components.
+
+```{r, comment=""}
+
+#As there are many variables some of them may be correlated and a PCA could avoid the effect of these correlations
+PCA <- preProcess(training[,-53], method="pca", thresh = 0.90)
+trainPCA <- predict(PCA, training[,-53])
+trainPCA$classe <- as.factor(training$classe)
+modellda <- train(classe~., data=trainPCA,method="lda")
+modellda$results
+```
+
+The accuracy of the model was lower than the first model without preprocessing. So I selected the first model, using all the variables to make predictions over the testing dataset.
+
+### Testing the model
+
+Using the `confusionMatrix` function, we can compared our predicted values with the real values.
+```{r, comment=""}
+#we have to calculate the values for the principal components using the testing dataset
+testPCA <- predict(PCA, testing)
+predictionPCA <- predict(modellda, testPCA)
+predictionlda <- predict(model1, testing)
+
+#Finally we want to see if the predictions on the test dataset are optimal or not
+confusionMatrix(as.factor(testing$classe), predictionlda)
+
+```
+
+The general accuracy was again near the 70%. Some values in this matrix are worthy to discuss. If you see the statistics by Class, you will see that the values for the Class A (an optimal weight lifting) are quite acceptable. This means that the model does a better job differentiating between correct and incorrect weight lifting. But the major problem is that the model does not differentiate between the different classes of incorrect weight lifting.
+
+To solve this problem we must consider to use more complex models, because I already tried to perform preprocessing analysis and the resutls were far from expected.
+
+Other possible explanation is the **out of sample error**, because it could be quite difficult to different people to make a movement in a high reproducible way, this may add noise to our data and lower the power of explanation of different predictors.
